@@ -16,11 +16,6 @@ pub enum Op {
     Pow,
 }
 
-#[derive(Debug)]
-pub enum Unary {
-    Neg,
-}
-
 impl Op {
     fn precedence(&self) -> i32 {
         match self {
@@ -42,7 +37,7 @@ impl Op {
 }
 
 #[derive(Debug)]
-enum Item {
+pub enum Item {
     Number(i32),
     Operator(Op),
 }
@@ -55,6 +50,14 @@ pub struct BinaryExpressionTree {
 }
 
 impl BinaryExpressionTree {
+    pub fn new(val: Item) -> Self {
+        Self { root: val, left: None, right: None }
+    }
+
+    pub fn from(val: Item, l: Self, r: Self) -> Self {
+        Self { root: val, left: Some(Box::new(l)), right: Some(Box::new(r)) }
+    }
+
     pub fn evaluate(&self) -> i32 {
         if let Item::Number(c) = &self.root {
             *c
@@ -79,14 +82,9 @@ pub fn tokenize(expr: String) -> Vec<Token> {
                     continue;
                 }
                 match &tokens[tokens.len()-1] {
-                    Token::Operator(op) => {
-                        tokens.push(Token::Unary);
-                    }
-                    Token::Number(val) => tokens.push(Token::Operator(Op::Sub)),
-                    Token::Parenthesis(c) => tokens.push(Token::Unary),
-                    Token::Unary => tokens.push(Token::Unary)
+                    Token::Number(_) => tokens.push(Token::Operator(Op::Sub)),
+                    _ => tokens.push(Token::Unary)
                 };
-                ;
             }
             '*' => tokens.push(Token::Operator(Op::Mul)),
             '/' => tokens.push(Token::Operator(Op::Div)),
@@ -119,7 +117,7 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
     let mut trees: Vec<BinaryExpressionTree> = Vec::new();
     for t in tokens {
         match t {
-            Token::Number(v) => trees.push(BinaryExpressionTree{root: Item::Number(v), left: None, right: None}),
+            Token::Number(v) => trees.push(BinaryExpressionTree::new(Item::Number(v))),
             Token::Unary => {
                 stack.push(t);
             }
@@ -132,7 +130,8 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
                     }
                     if let Token::Unary = stack[stack.len() - 1] {
                         let t1 = trees.pop().unwrap();
-                        trees.push(BinaryExpressionTree{root: Item::Operator(Op::Sub), left: Some(Box::new(BinaryExpressionTree{root: Item::Number(0), left:None, right: None})), right: Some(Box::new(t1))});
+                        trees.push(BinaryExpressionTree::from(
+                                Item::Operator(Op::Sub), BinaryExpressionTree::new(Item::Number(0)), t1));
                         stack.pop();
                         
                     } else if let Token::Operator(ref op) = stack[stack.len() - 1] {
@@ -140,7 +139,7 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
                             let t2 = trees.pop().unwrap();
                             let t1 = trees.pop().unwrap();
                             if let Token::Operator(top) = stack.pop().unwrap() {
-                                trees.push(BinaryExpressionTree{root: Item::Operator(top), left: Some(Box::new(t1)), right: Some(Box::new(t2))});
+                                trees.push(BinaryExpressionTree::from(Item::Operator(top), t1, t2));
                             }
                         } else {
                             break;
@@ -160,14 +159,15 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
                             }
                             if let Token::Unary = stack[stack.len() - 1] {
                                 let t1 = trees.pop().unwrap();
-                                trees.push(BinaryExpressionTree{root: Item::Operator(Op::Sub), left: Some(Box::new(BinaryExpressionTree{root: Item::Number(0), left:None, right: None})), right: Some(Box::new(t1))});
+                                trees.push(BinaryExpressionTree::from(
+                                        Item::Operator(Op::Sub), BinaryExpressionTree::new(Item::Number(0)), t1));
                                 stack.pop();
                                 
                             } else {
                                 let t2 = trees.pop().unwrap();
                                 let t1 = trees.pop().unwrap();
                                 if let Token::Operator(op) = stack.pop().unwrap() {
-                                    trees.push(BinaryExpressionTree{root: Item::Operator(op), left: Some(Box::new(t1)), right: Some(Box::new(t2))});
+                                    trees.push(BinaryExpressionTree::from(Item::Operator(op), t1, t2));
                                 }
                             }
                         }
@@ -184,13 +184,14 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
         }
         if let Token::Unary = stack[stack.len() - 1] {
             let t1 = trees.pop().unwrap();
-            trees.push(BinaryExpressionTree{root: Item::Operator(Op::Sub), left: Some(Box::new(BinaryExpressionTree{root: Item::Number(0), left:None, right: None})), right: Some(Box::new(t1))});
+            trees.push(BinaryExpressionTree::from(
+                    Item::Operator(Op::Sub), BinaryExpressionTree::new(Item::Number(0)), t1));
             stack.pop();
                                     
         } else if let Token::Operator(op) = stack.pop().unwrap() {
                 let t2 = trees.pop().unwrap();
                 let t1 = trees.pop().unwrap();
-                trees.push(BinaryExpressionTree{root: Item::Operator(op), left: Some(Box::new(t1)), right: Some(Box::new(t2))});
+                trees.push(BinaryExpressionTree::from(Item::Operator(op), t1, t2));
         }
     }
     trees.pop().unwrap()
@@ -223,9 +224,6 @@ mod tests {
             ("3*-(4+2)", -18),
         ];
         for (expr, res) in expressions {
-            if res == -3 {
-                println!("{:?}", to_expression_tree(tokenize(String::from(expr))));
-            } 
             assert_eq!(to_expression_tree(tokenize(String::from(expr))).evaluate(), res);
         }
     }
