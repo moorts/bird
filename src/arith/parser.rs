@@ -1,10 +1,10 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, iter::Peekable};
 #[derive(Debug)]
 pub enum Token {
     Number(i32),
     Operator(Op),
     Parenthesis(char),
-    Unary
+    Unary,
 }
 
 #[derive(Debug)]
@@ -13,15 +13,21 @@ pub enum Op {
     Sub,
     Mul,
     Div,
-    Pow,
+    Mod,
+    And,
+    Or,
+    Xor,
+    Shr,
+    Shl,
 }
 
 impl Op {
     fn precedence(&self) -> i32 {
         match self {
+            Self::Or | Self::Xor => -2,
+            Self::And => -1,
             Self::Add | Self::Sub => 0,
-            Self::Mul | Self::Div => 1,
-            Self::Pow => 2,
+            Self::Mul | Self::Div | Self::Mod | Self::Shl | Self::Shr => 1,
         }
     }
 
@@ -31,7 +37,12 @@ impl Op {
             Self::Sub => arg1 - arg2,
             Self::Mul => arg1 * arg2,
             Self::Div => arg1 / arg2,
-            Self::Pow => arg1.pow(arg2.try_into().unwrap()),
+            Self::Mod => arg1 % arg2,
+            Self::And => arg1 & arg2,
+            Self::Or => arg1 | arg2,
+            Self::Xor => arg1 ^ arg2,
+            Self::Shr => arg1 >> arg2,
+            Self::Shl => arg1 << arg2,
         }
     }
 }
@@ -51,24 +62,34 @@ pub struct BinaryExpressionTree {
 
 impl BinaryExpressionTree {
     pub fn new(val: Item) -> Self {
-        Self { root: val, left: None, right: None }
+        Self {
+            root: val,
+            left: None,
+            right: None,
+        }
     }
 
     pub fn from(val: Item, l: Self, r: Self) -> Self {
-        Self { root: val, left: Some(Box::new(l)), right: Some(Box::new(r)) }
+        Self {
+            root: val,
+            left: Some(Box::new(l)),
+            right: Some(Box::new(r)),
+        }
     }
 
     pub fn evaluate(&self) -> i32 {
         if let Item::Number(c) = &self.root {
             *c
         } else if let Item::Operator(op) = &self.root {
-            op.apply(self.left.as_ref().unwrap().evaluate(), self.right.as_ref().unwrap().evaluate())
+            op.apply(
+                self.left.as_ref().unwrap().evaluate(),
+                self.right.as_ref().unwrap().evaluate(),
+            )
         } else {
             0
         }
     }
 }
-
 
 pub fn tokenize(expr: String) -> Vec<Token> {
     let mut tokens = Vec::new();
@@ -81,14 +102,27 @@ pub fn tokenize(expr: String) -> Vec<Token> {
                     tokens.push(Token::Unary);
                     continue;
                 }
-                match &tokens[tokens.len()-1] {
+                match &tokens[tokens.len() - 1] {
                     Token::Number(_) => tokens.push(Token::Operator(Op::Sub)),
-                    _ => tokens.push(Token::Unary)
+                    _ => tokens.push(Token::Unary),
                 };
             }
             '*' => tokens.push(Token::Operator(Op::Mul)),
             '/' => tokens.push(Token::Operator(Op::Div)),
-            '^' => tokens.push(Token::Operator(Op::Pow)),
+            'X' if consume(&mut chars, "OR") => {
+                tokens.push(Token::Operator(Op::Xor));
+            }
+            'O' if consume(&mut chars, "R") => {
+                tokens.push(Token::Operator(Op::Xor));
+            }
+            'A' if consume(&mut chars, "ND") => tokens.push(Token::Operator(Op::And)),
+            'S' if consume(&mut chars, "H") => {
+                if let Some('L') = chars.next() {
+                    tokens.push(Token::Operator(Op::Shl));
+                } else if let Some('R') = chars.next() {
+                    tokens.push(Token::Operator(Op::Shr));
+                }
+            }
             '(' | ')' => tokens.push(Token::Parenthesis(c)),
             '0'..='9' => {
                 let mut num_str = String::from(c);
@@ -101,11 +135,22 @@ pub fn tokenize(expr: String) -> Vec<Token> {
                     }
                 }
                 tokens.push(Token::Number(num_str.parse::<i32>().unwrap()));
-            },
+            }
             _ => (),
         }
     }
     tokens
+}
+
+fn consume(chars: &mut Peekable<impl Iterator<Item = char>>, expected: &str) -> bool {
+    for c in expected.chars() {
+        if let Some(c) = chars.peek() {
+            chars.next();
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /*
@@ -131,9 +176,11 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
                     if let Token::Unary = stack[stack.len() - 1] {
                         let t1 = trees.pop().unwrap();
                         trees.push(BinaryExpressionTree::from(
-                                Item::Operator(Op::Sub), BinaryExpressionTree::new(Item::Number(0)), t1));
+                            Item::Operator(Op::Sub),
+                            BinaryExpressionTree::new(Item::Number(0)),
+                            t1,
+                        ));
                         stack.pop();
-                        
                     } else if let Token::Operator(ref op) = stack[stack.len() - 1] {
                         if op.precedence() >= c.precedence() {
                             let t2 = trees.pop().unwrap();
@@ -147,33 +194,33 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
                     }
                 }
                 stack.push(t);
-            },
-            Token::Parenthesis(c) => {
-                match c {
-                    '(' => stack.push(t),
-                    ')' => {
-                        while stack.len() > 0 {
-                            if let Token::Parenthesis(_) = stack[stack.len() - 1] {
-                                stack.pop();
-                                break;
-                            }
-                            if let Token::Unary = stack[stack.len() - 1] {
-                                let t1 = trees.pop().unwrap();
-                                trees.push(BinaryExpressionTree::from(
-                                        Item::Operator(Op::Sub), BinaryExpressionTree::new(Item::Number(0)), t1));
-                                stack.pop();
-                                
-                            } else {
-                                let t2 = trees.pop().unwrap();
-                                let t1 = trees.pop().unwrap();
-                                if let Token::Operator(op) = stack.pop().unwrap() {
-                                    trees.push(BinaryExpressionTree::from(Item::Operator(op), t1, t2));
-                                }
+            }
+            Token::Parenthesis(c) => match c {
+                '(' => stack.push(t),
+                ')' => {
+                    while stack.len() > 0 {
+                        if let Token::Parenthesis(_) = stack[stack.len() - 1] {
+                            stack.pop();
+                            break;
+                        }
+                        if let Token::Unary = stack[stack.len() - 1] {
+                            let t1 = trees.pop().unwrap();
+                            trees.push(BinaryExpressionTree::from(
+                                Item::Operator(Op::Sub),
+                                BinaryExpressionTree::new(Item::Number(0)),
+                                t1,
+                            ));
+                            stack.pop();
+                        } else {
+                            let t2 = trees.pop().unwrap();
+                            let t1 = trees.pop().unwrap();
+                            if let Token::Operator(op) = stack.pop().unwrap() {
+                                trees.push(BinaryExpressionTree::from(Item::Operator(op), t1, t2));
                             }
                         }
-                    },
-                    _ => (),
+                    }
                 }
+                _ => (),
             },
         }
     }
@@ -185,13 +232,15 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
         if let Token::Unary = stack[stack.len() - 1] {
             let t1 = trees.pop().unwrap();
             trees.push(BinaryExpressionTree::from(
-                    Item::Operator(Op::Sub), BinaryExpressionTree::new(Item::Number(0)), t1));
+                Item::Operator(Op::Sub),
+                BinaryExpressionTree::new(Item::Number(0)),
+                t1,
+            ));
             stack.pop();
-                                    
         } else if let Token::Operator(op) = stack.pop().unwrap() {
-                let t2 = trees.pop().unwrap();
-                let t1 = trees.pop().unwrap();
-                trees.push(BinaryExpressionTree::from(Item::Operator(op), t1, t2));
+            let t2 = trees.pop().unwrap();
+            let t1 = trees.pop().unwrap();
+            trees.push(BinaryExpressionTree::from(Item::Operator(op), t1, t2));
         }
     }
     trees.pop().unwrap()
@@ -215,16 +264,22 @@ mod tests {
             ("3 + 4 * (4 + 2)", 27),
             ("(3) * (4 + 2)", 18),
             ("(((3)))", 3),
-            ("3^2*3", 27),
-            ("3^(2*3)", (3 as i32).pow(6)),
-            ("3^2+3", 12),
-            ("3*3^2+3", 30),
+            //("3^2*3", 27),
+            //("3^(2*3)", (3 as i32).pow(6)),
+            //("3^2+3", 12),
+            //("3*3^2+3", 30),
             ("-3", -3),
             ("3 + -4", -1),
             ("3*-(4+2)", -18),
+            ("27 XOR 9", 27 ^ 9),
+            ("6 AND 6", 6),
+            ("200 OR 1", 201),
         ];
         for (expr, res) in expressions {
-            assert_eq!(to_expression_tree(tokenize(String::from(expr))).evaluate(), res);
+            assert_eq!(
+                to_expression_tree(tokenize(String::from(expr))).evaluate(),
+                res
+            );
         }
     }
 }
