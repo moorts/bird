@@ -1,4 +1,4 @@
-use std::{convert::TryInto, iter::Peekable};
+use std::{convert::TryInto, iter::Peekable, str::Chars};
 #[derive(Debug)]
 pub enum Token {
     Number(i32),
@@ -127,14 +127,32 @@ pub fn tokenize(expr: String) -> Vec<Token> {
             '0'..='9' => {
                 let mut num_str = String::from(c);
                 while let Some(d) = chars.peek() {
-                    if d.is_numeric() {
-                        num_str.push(*d);
-                        chars.next();
-                    } else {
-                        break;
+                    match d {
+                        '0'..='9' | 'a'..='f' => {
+                            num_str.push(*d);
+                            chars.next();
+                        }
+                        'H' => {
+                            tokens.push(Token::Number(i32::from_str_radix(&num_str, 16).unwrap()));
+                            chars.next();
+                            break;
+                        }
+                        'B' => {
+                            tokens.push(Token::Number(i32::from_str_radix(&num_str, 2).unwrap()));
+                            chars.next();
+                            break;
+                        }
+                        'O' => {
+                            tokens.push(Token::Number(i32::from_str_radix(&num_str, 8).unwrap()));
+                            chars.next();
+                            break;
+                        }
+                        _ => {
+                            tokens.push(Token::Number(num_str.parse::<i32>().unwrap()));
+                            break;
+                        }
                     }
                 }
-                tokens.push(Token::Number(num_str.parse::<i32>().unwrap()));
             }
             _ => (),
         }
@@ -144,13 +162,88 @@ pub fn tokenize(expr: String) -> Vec<Token> {
 
 fn consume(chars: &mut Peekable<impl Iterator<Item = char>>, expected: &str) -> bool {
     for c in expected.chars() {
-        if let Some(c) = chars.peek() {
+        if chars.next_if(|&x| x == c).is_some() {
             chars.next();
         } else {
             return false;
         }
     }
     true
+}
+
+struct Tokenizer<'a> {
+    chars: Peekable<Chars<'a>>,
+}
+
+impl<'a> Tokenizer<'a> {
+    fn new(input_str: &'a str) -> Self {
+        Self {
+            chars: input_str.chars().peekable(),
+        }
+    }
+
+    fn consume(&mut self, expected: &str) -> bool {
+        for c in expected.chars() {
+            if self.chars.next_if(|&x| x == c).is_none() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl<'a> Iterator for Tokenizer<'a> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(c) = self.chars.next() {
+            match c {
+                '+' => Some(Token::Operator(Op::Add)),
+                '-' => Some(Token::Operator(Op::Sub)),
+                '*' => Some(Token::Operator(Op::Mul)),
+                '/' => Some(Token::Operator(Op::Div)),
+                'X' if self.consume("OR") => Some(Token::Operator(Op::Xor)),
+                'A' if self.consume("ND") => Some(Token::Operator(Op::And)),
+                'O' if self.consume("R") => Some(Token::Operator(Op::Or)),
+                'S' if self.consume("H") => {
+                    if self.consume("L") {
+                        Some(Token::Operator(Op::Shl))
+                    } else if self.consume("R") {
+                        Some(Token::Operator(Op::Shr))
+                    } else {
+                        panic!();
+                    }
+                }
+                '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                    let mut num_str = String::from(c);
+                    while let Some(digit) = self.chars.next_if(|&x| x.is_ascii_hexdigit()) {
+                        num_str.push(digit);
+                    }
+                    if let Some(post) = self.chars.peek() {
+                        return match post {
+                            'H' => Some(Token::Number(i32::from_str_radix(&num_str, 16).unwrap())),
+                            'O' | 'Q' => Some(Token::Number(i32::from_str_radix(&num_str, 8).unwrap())),
+                            _ => Some(Token::Number(i32::from_str_radix(&num_str, 10).unwrap())),
+                        }
+                    }
+                    if let Some(post) = self.chars.next_if(|&x| x == 'H') {
+                        Some(Token::Number(i32::from_str_radix(&num_str, 16).unwrap()))
+                    } else if let Some(post) = self.chars.next_if(|&x| x == 'B') {
+                        Some(Token::Number(i32::from_str_radix(&num_str, 2).unwrap()))
+                    } else if let Some(post) = self.chars.next_if(|&x| x == 'O' || x == 'Q') {
+                        Some(Token::Number(i32::from_str_radix(&num_str, 8).unwrap()))
+                    } else if let Some(post) = self.chars.next_if(|&x| x == 'D') {
+                        Some(Token::Number(i32::from_str_radix(&num_str, 10).unwrap()))
+                    } else {
+                        Some(Token::Number(i32::from_str_radix(&num_str, 10).unwrap()))
+                    }
+                }
+                _ => panic!(),
+            }
+        } else {
+            None
+        }
+    }
 }
 
 /*
@@ -281,5 +374,17 @@ mod tests {
                 res
             );
         }
+    }
+
+    #[test]
+    fn tokenizer() {
+        let mut t = Tokenizer::new("Hello");
+        assert!(false);
+    }
+
+    #[test]
+    fn number_formats() {
+        println!("{:?}", tokenize(String::from("0aH")));
+        assert!(false);
     }
 }
