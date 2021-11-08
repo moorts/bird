@@ -1,5 +1,5 @@
 use std::{convert::TryInto, iter::Peekable, str::Chars};
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Token {
     Number(i32),
     Operator(Op),
@@ -7,7 +7,7 @@ pub enum Token {
     Unary,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Op {
     Add,
     Sub,
@@ -228,14 +228,14 @@ impl<'a> Iterator for Tokenizer<'a> {
                     }
                     if let Some(post) = self.chars.next_if(|&x| x == 'H') {
                         Some(Token::Number(i32::from_str_radix(&num_str, 16).unwrap()))
-                    } else if let Some(post) = self.chars.next_if(|&x| x == 'B') {
-                        Some(Token::Number(i32::from_str_radix(&num_str, 2).unwrap()))
                     } else if let Some(post) = self.chars.next_if(|&x| x == 'O' || x == 'Q') {
                         Some(Token::Number(i32::from_str_radix(&num_str, 8).unwrap()))
-                    } else if let Some(post) = self.chars.next_if(|&x| x == 'D') {
-                        Some(Token::Number(i32::from_str_radix(&num_str, 10).unwrap()))
                     } else {
-                        Some(Token::Number(i32::from_str_radix(&num_str, 10).unwrap()))
+                        match num_str.chars().last().unwrap() {
+                            'B' => Some(Token::Number(i32::from_str_radix(&num_str[..num_str.len()-1], 2).unwrap())),
+                            'D' => Some(Token::Number(i32::from_str_radix(&num_str[..num_str.len()-1], 10).unwrap())),
+                            _ => Some(Token::Number(i32::from_str_radix(&num_str, 10).unwrap())),
+                        }
                     }
                 }
                 _ => panic!(),
@@ -378,8 +378,23 @@ mod tests {
 
     #[test]
     fn tokenizer() {
-        let mut t = Tokenizer::new("Hello");
-        assert!(false);
+        for x in 0..1000 {
+            let hex: &str = &format!("{:x}H", x);
+            let oct: &str = &format!("{:o}O", x);
+            let bin: &str = &format!("{:b}B", x);
+            let dec: &str = &format!("{}D", x);
+            let dec2: &str = &format!("{}", x);
+            let mut t1 = Tokenizer::new(hex);
+            let mut t2 = Tokenizer::new(oct);
+            let mut t3 = Tokenizer::new(bin);
+            let mut t4 = Tokenizer::new(dec);
+            let mut t5 = Tokenizer::new(dec2);
+            assert_eq!(t1.next(), Some(Token::Number(x)));
+            assert_eq!(t2.next(), Some(Token::Number(x)));
+            assert_eq!(t3.next(), Some(Token::Number(x)));
+            assert_eq!(t4.next(), Some(Token::Number(x)));
+            assert_eq!(t5.next(), Some(Token::Number(x)));
+        }
     }
 
     #[test]
