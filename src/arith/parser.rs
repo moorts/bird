@@ -1,4 +1,5 @@
-use std::{convert::TryInto, iter::Peekable, str::Chars};
+use core::fmt;
+use std::{convert::TryInto, iter::Peekable, str::Chars, fmt::{Display, Formatter}};
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Token {
     Number(i32),
@@ -19,6 +20,16 @@ impl UnOp {
             Self::Minus => -arg1,
             Self::Not => !arg1
         }
+    }
+}
+
+impl Display for UnOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Minus => f.write_str("-")?,
+            Self::Not => f.write_str("NOT")?
+        };
+        Ok(())
     }
 }
 
@@ -59,6 +70,24 @@ impl Op {
             Self::Shr => arg1 >> arg2,
             Self::Shl => arg1 << arg2,
         }
+    }
+}
+
+impl Display for Op {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Add => f.write_str("+")?,
+            Self::Sub => f.write_str("-")?,
+            Self::Mul => f.write_str("*")?,
+            Self::Div => f.write_str("/")?,
+            Self::Mod => f.write_str("MOD")?,
+            Self::And => f.write_str("AND")?,
+            Self::Or => f.write_str("OR")?,
+            Self::Xor => f.write_str("XOR")?,
+            Self::Shr => f.write_str("SHR")?,
+            Self::Shl => f.write_str("SHL")?,
+        };
+        Ok(())
     }
 }
 
@@ -201,7 +230,7 @@ impl<'a> Iterator for Tokenizer<'a> {
     }
 }
 
-pub fn eval_tokens(tokens: Vec<Token>) -> i32 {
+pub fn eval_tokens(tokens: Vec<Token>) -> Result<i32, String> {
     let mut stack: Vec<Token> = Vec::new();
     let mut args = Vec::new();
     for t in tokens {
@@ -220,13 +249,13 @@ pub fn eval_tokens(tokens: Vec<Token>) -> i32 {
                         break;
                     }
                     if let Token::Unary(op) = stack[stack.len() - 1] {
-                        let res = op.apply(args.pop().unwrap());
-                        args.push(res);
+                        let t1 = args.pop().ok_or(format!("Not enough arguments for unary operator: {}", &op))?;
+                        args.push(op.apply(t1));
                         stack.pop();
                     } else if let Token::Operator(ref op) = stack[stack.len() - 1] {
                         if op.precedence() >= c.precedence() {
-                            let t1 = args.pop().unwrap();
-                            let t2 = args.pop().unwrap();
+                            let t1 = args.pop().ok_or(format!("Not enough arguments for operator: {}", &op))?;
+                            let t2 = args.pop().ok_or(format!("Not enough arguments for operator: {}", &op))?;
                             if let Token::Operator(top) = stack.pop().unwrap() {
                                 args.push(top.apply(t1, t2));
                             }
@@ -246,13 +275,13 @@ pub fn eval_tokens(tokens: Vec<Token>) -> i32 {
                             break;
                         }
                         if let Token::Unary(op) = stack[stack.len() - 1] {
-                            let res = op.apply(args.pop().unwrap());
-                            args.push(res);
+                            let t1 = args.pop().ok_or(format!("Not enough arguments for unary operator: {}", &op))?;
+                            args.push(op.apply(t1));
                             stack.pop();
                         } else {
-                            let t2 = args.pop().unwrap();
-                            let t1 = args.pop().unwrap();
                             if let Token::Operator(op) = stack.pop().unwrap() {
+                                let t2 = args.pop().ok_or(format!("Not enough arguments for operator: {}", &op))?;
+                                let t1 = args.pop().ok_or(format!("Not enough arguments for operator: {}", &op))?;
                                 args.push(op.apply(t1, t2));
                             }
                         }
@@ -268,23 +297,23 @@ pub fn eval_tokens(tokens: Vec<Token>) -> i32 {
             panic!("Parenthesis in stack after traversing all tokens");
         }
         if let Token::Unary(op) = stack[stack.len() - 1] {
-            let res = op.apply(args.pop().unwrap());
-            args.push(res);
+            let t1 = args.pop().ok_or(format!("Not enough arguments for unary operator: {}", &op))?;
+            args.push(op.apply(t1));
             stack.pop();
         } else if let Token::Operator(op) = stack.pop().unwrap() {
-            let t2 = args.pop().unwrap();
-            let t1 = args.pop().unwrap();
+            let t2 = args.pop().ok_or(format!("Not enough arguments for operator: {}", &op))?;
+            let t1 = args.pop().ok_or(format!("Not enough arguments for operator: {}", &op))?;
             args.push(op.apply(t1, t2));
         }
     }
-    args.pop().unwrap()
+    Ok(args.pop().unwrap())
 }
 
 /*
-* Convert Token vector to binary expression tree using the shunning yard algorithm
+* !! DOES NOT WORK FOR UNARY NOT !!
+* Convert Token vector to binary expression tree using the shunting yard algorithm
 * RANGIERBAHNHOF
  */
-/*
 pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
     let mut stack: Vec<Token> = Vec::new();
     let mut trees: Vec<BinaryExpressionTree> = Vec::new();
@@ -301,7 +330,7 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
                     if let Token::Parenthesis(_) = stack[stack.len() - 1] {
                         break;
                     }
-                    if let Token::Unary = stack[stack.len() - 1] {
+                    if let Token::Unary(_) = stack[stack.len() - 1] {
                         let t1 = trees.pop().unwrap();
                         trees.push(BinaryExpressionTree::from(
                             Item::Operator(Op::Sub),
@@ -331,7 +360,7 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
                             stack.pop();
                             break;
                         }
-                        if let Token::Unary = stack[stack.len() - 1] {
+                        if let Token::Unary(_) = stack[stack.len() - 1] {
                             let t1 = trees.pop().unwrap();
                             trees.push(BinaryExpressionTree::from(
                                 Item::Operator(Op::Sub),
@@ -357,7 +386,7 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
         if let Token::Parenthesis(_) = stack[stack.len() - 1] {
             panic!("Parenthesis in stack after traversing all tokens");
         }
-        if let Token::Unary = stack[stack.len() - 1] {
+        if let Token::Unary(_) = stack[stack.len() - 1] {
             let t1 = trees.pop().unwrap();
             trees.push(BinaryExpressionTree::from(
                 Item::Operator(Op::Sub),
@@ -373,7 +402,6 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
     }
     trees.pop().unwrap()
 }
-*/
 
 #[cfg(test)]
 mod tests {
@@ -410,17 +438,23 @@ mod tests {
         ];
         for (expr, res) in expressions {
             let tokens = Tokenizer::new(expr).collect();
-            /*
             assert_eq!(
-                to_expression_tree(tokens).evaluate(),
+                eval_tokens(tokens).expect(""),
                 res
             );
-            */
-            //tokens = Tokenizer::new(expr).collect();
-            assert_eq!(
-                eval_tokens(tokens),
-                res
-            );
+        }
+    }
+
+    #[test]
+    fn erroneous_expressions() {
+        let expressions = vec![
+            ("4 +", "Not enough arguments for operator: +"),
+            ("-", "Not enough arguments for unary operator: -"),
+            ("NOT", "Not enough arguments for unary operator: NOT")
+        ];
+        for (expr, err) in expressions {
+            let tokens = Tokenizer::new(expr).collect();
+            assert_eq!(eval_tokens(tokens), Err(String::from(err)));
         }
     }
 
