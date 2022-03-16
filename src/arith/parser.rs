@@ -1,13 +1,28 @@
 use std::{convert::TryInto, iter::Peekable, str::Chars};
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Token {
     Number(i32),
     Operator(Op),
     Parenthesis(char),
-    Unary,
+    Unary(UnOp),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum UnOp {
+    Minus,
+    Not
+}
+
+impl UnOp {
+    fn apply(&self, arg1: i32) -> i32 {
+        match self {
+            Self::Minus => -arg1,
+            Self::Not => !arg1
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Op {
     Add,
     Sub,
@@ -26,8 +41,8 @@ impl Op {
         match self {
             Self::Or | Self::Xor => -2,
             Self::And => -1,
-            Self::Add | Self::Sub => 0,
-            Self::Mul | Self::Div | Self::Mod | Self::Shl | Self::Shr => 1,
+            Self::Add | Self::Sub => 1,
+            Self::Mul | Self::Div | Self::Mod | Self::Shl | Self::Shr => 2,
         }
     }
 
@@ -91,94 +106,16 @@ impl BinaryExpressionTree {
     }
 }
 
-pub fn tokenize(expr: String) -> Vec<Token> {
-    let mut tokens = Vec::new();
-    let mut chars = expr.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '+' => tokens.push(Token::Operator(Op::Add)),
-            '-' => {
-                if tokens.len() == 0 {
-                    tokens.push(Token::Unary);
-                    continue;
-                }
-                match &tokens[tokens.len() - 1] {
-                    Token::Number(_) => tokens.push(Token::Operator(Op::Sub)),
-                    _ => tokens.push(Token::Unary),
-                };
-            }
-            '*' => tokens.push(Token::Operator(Op::Mul)),
-            '/' => tokens.push(Token::Operator(Op::Div)),
-            'X' if consume(&mut chars, "OR") => {
-                tokens.push(Token::Operator(Op::Xor));
-            }
-            'O' if consume(&mut chars, "R") => {
-                tokens.push(Token::Operator(Op::Xor));
-            }
-            'A' if consume(&mut chars, "ND") => tokens.push(Token::Operator(Op::And)),
-            'S' if consume(&mut chars, "H") => {
-                if let Some('L') = chars.next() {
-                    tokens.push(Token::Operator(Op::Shl));
-                } else if let Some('R') = chars.next() {
-                    tokens.push(Token::Operator(Op::Shr));
-                }
-            }
-            '(' | ')' => tokens.push(Token::Parenthesis(c)),
-            '0'..='9' => {
-                let mut num_str = String::from(c);
-                while let Some(d) = chars.peek() {
-                    match d {
-                        '0'..='9' | 'a'..='f' => {
-                            num_str.push(*d);
-                            chars.next();
-                        }
-                        'H' => {
-                            tokens.push(Token::Number(i32::from_str_radix(&num_str, 16).unwrap()));
-                            chars.next();
-                            break;
-                        }
-                        'B' => {
-                            tokens.push(Token::Number(i32::from_str_radix(&num_str, 2).unwrap()));
-                            chars.next();
-                            break;
-                        }
-                        'O' => {
-                            tokens.push(Token::Number(i32::from_str_radix(&num_str, 8).unwrap()));
-                            chars.next();
-                            break;
-                        }
-                        _ => {
-                            tokens.push(Token::Number(num_str.parse::<i32>().unwrap()));
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => (),
-        }
-    }
-    tokens
-}
-
-fn consume(chars: &mut Peekable<impl Iterator<Item = char>>, expected: &str) -> bool {
-    for c in expected.chars() {
-        if chars.next_if(|&x| x == c).is_some() {
-            chars.next();
-        } else {
-            return false;
-        }
-    }
-    true
-}
 
 struct Tokenizer<'a> {
     chars: Peekable<Chars<'a>>,
+    previous: Option<Token>
 }
 
 impl<'a> Tokenizer<'a> {
     fn new(input_str: &'a str) -> Self {
         Self {
-            chars: input_str.chars().peekable(),
+            chars: input_str.chars().peekable(), previous: None
         }
     }
 
@@ -197,9 +134,22 @@ impl<'a> Iterator for Tokenizer<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(c) = self.chars.next() {
-            match c {
+            self.previous = match c {
+                '(' => Some(Token::Parenthesis('(')),
+                ')' => Some(Token::Parenthesis(')')),
                 '+' => Some(Token::Operator(Op::Add)),
-                '-' => Some(Token::Operator(Op::Sub)),
+                '-' => {
+                    match &self.previous {
+                        Some(token) => {
+                            match token {
+                                Token::Operator(_) => Some(Token::Unary(UnOp::Minus)),
+                                Token::Parenthesis('(') => Some(Token::Unary(UnOp::Minus)),
+                                _ => Some(Token::Operator(Op::Sub))
+                            }
+                        }
+                        None => Some(Token::Unary(UnOp::Minus))
+                    }
+                }
                 '*' => Some(Token::Operator(Op::Mul)),
                 '/' => Some(Token::Operator(Op::Div)),
                 'X' if self.consume("OR") => Some(Token::Operator(Op::Xor)),
@@ -214,22 +164,25 @@ impl<'a> Iterator for Tokenizer<'a> {
                         panic!();
                     }
                 }
+                'M' if self.consume("OD") => Some(Token::Operator(Op::Mod)),
+                'N' if self.consume("OT") => Some(Token::Unary(UnOp::Not)),
                 '0'..='9' | 'a'..='f' | 'A'..='F' => {
                     let mut num_str = String::from(c);
                     while let Some(digit) = self.chars.next_if(|&x| x.is_ascii_hexdigit()) {
                         num_str.push(digit);
                     }
                     if let Some(post) = self.chars.peek() {
-                        return match post {
-                            'H' => Some(Token::Number(i32::from_str_radix(&num_str, 16).unwrap())),
-                            'O' | 'Q' => Some(Token::Number(i32::from_str_radix(&num_str, 8).unwrap())),
+                        match post {
+                            'H' => {
+                                self.chars.next();
+                                Some(Token::Number(i32::from_str_radix(&num_str, 16).unwrap()))
+                            }
+                            'O' | 'Q' => {
+                                self.chars.next();
+                                Some(Token::Number(i32::from_str_radix(&num_str, 8).unwrap()))
+                            }
                             _ => Some(Token::Number(i32::from_str_radix(&num_str, 10).unwrap())),
                         }
-                    }
-                    if let Some(post) = self.chars.next_if(|&x| x == 'H') {
-                        Some(Token::Number(i32::from_str_radix(&num_str, 16).unwrap()))
-                    } else if let Some(post) = self.chars.next_if(|&x| x == 'O' || x == 'Q') {
-                        Some(Token::Number(i32::from_str_radix(&num_str, 8).unwrap()))
                     } else {
                         match num_str.chars().last().unwrap() {
                             'B' => Some(Token::Number(i32::from_str_radix(&num_str[..num_str.len()-1], 2).unwrap())),
@@ -238,25 +191,107 @@ impl<'a> Iterator for Tokenizer<'a> {
                         }
                     }
                 }
-                _ => panic!(),
-            }
+                c if c.is_whitespace() => self.next(),
+                _ => panic!()
+            };
+            self.previous
         } else {
             None
         }
     }
 }
 
+pub fn eval_tokens(tokens: Vec<Token>) -> i32 {
+    let mut stack: Vec<Token> = Vec::new();
+    let mut args = Vec::new();
+    for t in tokens {
+        match t {
+            Token::Number(v) => {
+                args.push(v);
+            }
+            Token::Unary(_) => {
+                stack.push(t);
+            }
+            Token::Operator(ref c) => {
+                // If precedence of t is lower than the top of the stack
+                // Pop stack until t has higher precedence than top
+                while stack.len() > 0 {
+                    if let Token::Parenthesis(_) = stack[stack.len() - 1] {
+                        break;
+                    }
+                    if let Token::Unary(op) = stack[stack.len() - 1] {
+                        let res = op.apply(args.pop().unwrap());
+                        args.push(res);
+                        stack.pop();
+                    } else if let Token::Operator(ref op) = stack[stack.len() - 1] {
+                        if op.precedence() >= c.precedence() {
+                            let t1 = args.pop().unwrap();
+                            let t2 = args.pop().unwrap();
+                            if let Token::Operator(top) = stack.pop().unwrap() {
+                                args.push(top.apply(t1, t2));
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                stack.push(t);
+            }
+            Token::Parenthesis(c) => match c {
+                '(' => stack.push(t),
+                ')' => {
+                    while stack.len() > 0 {
+                        if let Token::Parenthesis(_) = stack[stack.len() - 1] {
+                            stack.pop();
+                            break;
+                        }
+                        if let Token::Unary(op) = stack[stack.len() - 1] {
+                            let res = op.apply(args.pop().unwrap());
+                            args.push(res);
+                            stack.pop();
+                        } else {
+                            let t2 = args.pop().unwrap();
+                            let t1 = args.pop().unwrap();
+                            if let Token::Operator(op) = stack.pop().unwrap() {
+                                args.push(op.apply(t1, t2));
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            },
+        }
+    }
+    // No more Tokens in input -> process the remaining operators on the stack
+    while stack.len() > 0 {
+        if let Token::Parenthesis(_) = stack[stack.len() - 1] {
+            panic!("Parenthesis in stack after traversing all tokens");
+        }
+        if let Token::Unary(op) = stack[stack.len() - 1] {
+            let res = op.apply(args.pop().unwrap());
+            args.push(res);
+            stack.pop();
+        } else if let Token::Operator(op) = stack.pop().unwrap() {
+            let t2 = args.pop().unwrap();
+            let t1 = args.pop().unwrap();
+            args.push(op.apply(t1, t2));
+        }
+    }
+    args.pop().unwrap()
+}
+
 /*
 * Convert Token vector to binary expression tree using the shunning yard algorithm
 * RANGIERBAHNHOF
  */
+/*
 pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
     let mut stack: Vec<Token> = Vec::new();
     let mut trees: Vec<BinaryExpressionTree> = Vec::new();
     for t in tokens {
         match t {
             Token::Number(v) => trees.push(BinaryExpressionTree::new(Item::Number(v))),
-            Token::Unary => {
+            Token::Unary(_) => {
                 stack.push(t);
             }
             Token::Operator(ref c) => {
@@ -338,6 +373,7 @@ pub fn to_expression_tree(tokens: Vec<Token>) -> BinaryExpressionTree {
     }
     trees.pop().unwrap()
 }
+*/
 
 #[cfg(test)]
 mod tests {
@@ -367,10 +403,22 @@ mod tests {
             ("27 XOR 9", 27 ^ 9),
             ("6 AND 6", 6),
             ("200 OR 1", 201),
+            ("15 MOD 5", 0),
+            ("4 MOD 3", 1),
+            ("8 MOD 9", 8),
+            ("NOT 9", !9)
         ];
         for (expr, res) in expressions {
+            let tokens = Tokenizer::new(expr).collect();
+            /*
             assert_eq!(
-                to_expression_tree(tokenize(String::from(expr))).evaluate(),
+                to_expression_tree(tokens).evaluate(),
+                res
+            );
+            */
+            //tokens = Tokenizer::new(expr).collect();
+            assert_eq!(
+                eval_tokens(tokens),
                 res
             );
         }
@@ -395,11 +443,5 @@ mod tests {
             assert_eq!(t4.next(), Some(Token::Number(x)));
             assert_eq!(t5.next(), Some(Token::Number(x)));
         }
-    }
-
-    #[test]
-    fn number_formats() {
-        println!("{:?}", tokenize(String::from("0aH")));
-        assert!(false);
     }
 }
